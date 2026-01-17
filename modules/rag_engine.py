@@ -26,15 +26,15 @@ def create_vector_db(text, persist=False):
         FAISS vectorstore
     """
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, 
-        chunk_overlap=200,
+        chunk_size=750, 
+        chunk_overlap=150,
         separators=["\n\n", "\n", ". ", " ", ""]
     )
     chunks = text_splitter.split_text(text)
     
-    # İşlemci dostu embedding modeli
+    # Çok dilli embedding modeli - Türkçe için optimize edilmiş
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         model_kwargs={'device': 'cpu'}
     )
     
@@ -51,7 +51,7 @@ def load_vector_db():
     """Kayıtlı vektör veritabanını yükler."""
     if os.path.exists(VECTORSTORE_PATH):
         embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             model_kwargs={'device': 'cpu'}
         )
         return FAISS.load_local(VECTORSTORE_PATH, embeddings, allow_dangerous_deserialization=True)
@@ -60,13 +60,13 @@ def load_vector_db():
 def add_to_vector_db(text, existing_vectorstore=None):
     """Mevcut vektör veritabanına yeni metin ekler."""
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, 
-        chunk_overlap=200
+        chunk_size=750, 
+        chunk_overlap=150
     )
     chunks = text_splitter.split_text(text)
     
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         model_kwargs={'device': 'cpu'}
     )
     
@@ -128,7 +128,7 @@ def get_ai_response(model_name, vectorstore, user_question, chat_history=None):
                 role = "Kullanıcı" if msg["role"] == "user" else "Asistan"
                 history_text += f"{role}: {msg['content'][:200]}\n"
         
-        # 4. Gelişmiş prompt - Türkçe yanıt zorunlu ve kişiselleştirilmiş
+        # 4. Gelişmiş prompt - Chain of Thought + Türkçe yanıt
         template = """Sen LocalInsights asistanısın - akıllı, yardımsever ve kişiselleştirilmiş bir eğitim asistanısın.
 
 KULLANICI BİLGİLERİ:
@@ -143,20 +143,30 @@ DÖKÜMAN İÇERİĞİ:
 
 KULLANICI SORUSU: {question}
 
-GÖREVİN VE KURALLARIN:
-1. TÜM YANITLARIN MUTLAKA TÜRKÇE OLMALIDIR.
-2. Kullanıcının kim olduğunu KULLANICI BİLGİLERİ kısmından anla. Ancak kullanıcı mesajında ismini düzeltirse veya farklı bir bilgi verirse, her zaman KULLANICININ SON MESAJINI esas al.
-3. Selamlaşma, "nasılsın", "ismim ne" gibi kişisel veya genel sorulara nazikçe ve doğal bir şekilde yanıt ver.
-4. Teknik veya dersle ilgili konularda MUTLAKA verilen DÖKÜMAN İÇERİĞİ'ni ana kaynak olarak kullan. Bilgi dokümanda yoksa bunu belirt.
-5. Yanıtlarını yapılandırılmış, anlaşılır ve akıcı (ChatGPT tarzı) tut.
-6. Eğer kullanıcı ismini sorduğunda KULLANICI BİLGİLERİ boşsa veya çelişkili ise nazikçe ismini sorabilirsin.
+DÜŞÜNCE SÜRECİ (Adım adım düşün):
+1. Önce kullanıcının ne sorduğunu anla.
+2. Döküman içeriğinde ilgili bilgileri bul.
+3. Bilgiyi kullanıcının seviyesine uygun şekilde açıkla.
+4. Emin olmadığın bilgileri "Bu konuda dokümanda bilgi bulamadım" diye belirt.
 
-YANITINI TÜRKÇE OLARAK VER:"""
+KRİTİK KURALLAR:
+- TÜM YANITLAR MUTLAKA TÜRKÇE OLMALIDIR.
+- SADECE DÖKÜMAN İÇERİĞİNDEKİ bilgileri kullan. Uydurma yapma.
+- Bilgi dokümanda yoksa açıkça belirt.
+- Yapılandırılmış ve anlaşılır yanıtlar ver.
+- Kullanıcıya ismiyle hitap et (KULLANICI BİLGİLERİ'nden).
+
+YANIT FORMAT:
+- Kısa ve öz cevaplar ver.
+- Gerekirse madde işaretleri kullan.
+- Teknik terimleri açıkla.
+
+TÜRKÇE YANITINI VER:"""
         
         history_section = f"SON SOHBET GEÇMİŞİ:\n{history_text}" if history_text else ""
         
         prompt = ChatPromptTemplate.from_template(template)
-        llm = ChatOllama(model=model_name, temperature=0.3)
+        llm = ChatOllama(model=model_name, temperature=0.1)
         chain = prompt | llm
         
         response = chain.invoke({
@@ -185,21 +195,27 @@ def get_quick_answer(model_name, question):
     """
     try:
         user_profile, _ = get_personalized_context()
-        template = """Sen LocalInsights asistanısın. Yardımcı ve akıllı bir karakterin var.
+        template = """Sen LocalInsights asistanısın - akıllı ve yardımsever bir eğitim asistanı.
 
 KULLANICI BİLGİLERİ: {user_profile}
 
 KULLANICI SORUSU: {question}
 
-KURALLAR:
-1. Yanıtın mutlaka TÜRKÇE olsun.
-2. Kullanıcının ismini biliyorsan (Kullanıcı Bilgileri kısmına bak) ona ismiyle hitap et.
-3. Kısa, samimi ve net bir yanıt ver.
+DÜŞÜNCE SÜRECİ:
+1. Soruyu anla.
+2. Bildiğin bilgilerle kısa ve net yanıt ver.
+3. Emin değilsen belirt.
 
-TÜRKÇE YANITIN:"""
+KRİTİK KURALLAR:
+- MUTLAKA TÜRKÇE yanıt ver.
+- Kullanıcıya ismiyle hitap et.
+- Kısa ve samimi ol.
+- Uydurma yapma, bilmiyorsan söyle.
+
+TÜRKÇE YANITINI VER:"""
         
         prompt = ChatPromptTemplate.from_template(template)
-        llm = ChatOllama(model=model_name, temperature=0.5)
+        llm = ChatOllama(model=model_name, temperature=0.2)
         chain = prompt | llm
         
         response = chain.invoke({

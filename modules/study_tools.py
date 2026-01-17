@@ -192,7 +192,7 @@ def generate_flashcards(text, count=10, model_name="llama3"):
             text = text[:5000]
         
         prompt = ChatPromptTemplate.from_template(FLASHCARD_PROMPT)
-        llm = ChatOllama(model=model_name, temperature=0.5)
+        llm = ChatOllama(model=model_name, temperature=0.2)
         chain = prompt | llm
         
         response = chain.invoke({"text": text, "count": count})
@@ -232,7 +232,7 @@ def generate_quiz(text, count=10, model_name="llama3"):
             text = text[:5000]
         
         prompt = ChatPromptTemplate.from_template(QUIZ_PROMPT)
-        llm = ChatOllama(model=model_name, temperature=0.5)
+        llm = ChatOllama(model=model_name, temperature=0.2)
         chain = prompt | llm
         
         response = chain.invoke({"text": text, "count": count})

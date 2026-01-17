@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 from modules.database import (
     init_db, log_message_db,
     save_document, get_all_documents, get_document_by_id,
@@ -45,114 +45,83 @@ st.markdown("""
         color: #ffffff;
     }
     
-    /* Chat Interface Styling */
-    .stChatMessage {
-        background: transparent !important;
-        border: none !important;
-        padding: 0 !important;
-        margin-bottom: 25px !important;
-    }
-    
-    [data-testid="stChatMessageContent"] {
-        background: #161616 !important;
-        border: 1px solid #222 !important;
-        border-radius: 12px !important;
-        padding: 16px 20px !important;
-        color: #e0e0e0 !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
-    }
-    
-    [data-testid="stChatMessageAvatarAssistant"], 
-    [data-testid="stChatMessageAvatarUser"] {
-        display: none !important;
-    }
-    
-    [data-testid="stChatMessage"] > div {
-        padding-left: 0 !important;
-    }
-    
-    /* Chat Input & Model Selector Alignment */
+    /* Chat Input - Modern Single Color Design */
     [data-testid="stChatInput"] {
         position: fixed !important;
-        bottom: 30px !important;
-        left: 50% !important;
+        bottom: 25px !important;
+        left: calc(50% + 120px) !important;
         transform: translateX(-50%) !important;
-        width: 100% !important;
-        max-width: 800px !important;
+        width: calc(100% - 280px) !important;
+        max-width: 700px !important;
         z-index: 999 !important;
-        background-color: transparent !important;
+        background: transparent !important;
         border: none !important;
-        padding: 0 !important;
+        padding: 0 20px !important;
+    }
+    
+    /* Force ALL elements inside chat input to same color */
+    [data-testid="stChatInput"] * {
+        background-color: #1a1a1e !important;
+        border-color: #1a1a1e !important;
     }
     
     [data-testid="stChatInput"] > div {
-        background-color: #1a1a1a !important;
         border: 1px solid #333 !important;
-        border-radius: 16px !important; 
-        padding: 10px 15px 50px 15px !important;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
+        border-radius: 20px !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3) !important;
+        padding: 4px 12px !important;
+        background: #1a1a1e !important;
     }
 
     [data-testid="stChatInput"] textarea {
         background: transparent !important;
         border: none !important;
-        color: #ffffff !important;
-        font-family: 'Inter', sans-serif !important;
-        font-size: 1rem !important;
+        color: #e0e0e0 !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        font-size: 0.95rem !important;
         line-height: 1.5 !important;
         caret-color: #fff !important;
+        padding: 10px 4px !important;
+    }
+    
+    [data-testid="stChatInput"] textarea::placeholder {
+        color: #555 !important;
     }
      
     [data-testid="stChatInput"] button {
-        background-color: #2a2a2a !important;
+        background: linear-gradient(135deg, #5a5a60 0%, #3a3a40 100%) !important;
         color: #fff !important;
         border-radius: 50% !important;
-        bottom: 15px !important;
-        right: 15px !important;
-        width: 34px !important;
-        height: 34px !important;
-    }
-    [data-testid="stChatInput"] button:hover {
-        background-color: #444 !important;
-    }
-
-    .model-selector-wrapper {
-        position: fixed !important;
-        bottom: 45px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        width: 100% !important;
-        max-width: 800px !important;
-        z-index: 1000 !important;
-        pointer-events: none !important;
-        height: 50px;
-        display: flex;
-        align-items: center;
-        padding-left: 20px;
-    }
-
-    div[data-testid="stChatModel"] {
-        pointer-events: auto !important;
-        width: 150px !important;
+        width: 36px !important;
+        height: 36px !important;
+        border: none !important;
+        transition: all 0.2s ease !important;
     }
     
-    div[data-testid="stChatModel"] > div > div {
-        background: transparent !important;
-        border: none !important;
+    [data-testid="stChatInput"] button:hover {
+        background: linear-gradient(135deg, #6a6a70 0%, #4a4a50 100%) !important;
+        transform: scale(1.05) !important;
     }
-    div[data-testid="stChatModel"] [data-baseweb="select"] {
-        background: transparent !important;
+
+    /* Sidebar - Modern styling */
+    [data-testid="stSidebar"] {
+        background: #0a0a0c !important;
+        border-right: 1px solid #222 !important;
     }
-    div[data-testid="stChatModel"] [data-baseweb="select"] > div {
-        background: transparent !important;
-        color: #ddd !important;
-        font-weight: 500 !important;
-        font-size: 0.9rem !important;
+    
+    [data-testid="stSidebar"] [data-testid="stSelectbox"] > div {
+        background: #1a1a1e !important;
+        border: 1px solid #333 !important;
+        border-radius: 8px !important;
     }
-    div[data-testid="stChatModel"] [data-baseweb="icon"] {
-        color: #666 !important;
+    
+    [data-testid="stSidebar"] [data-testid="stFileUploader"] > div {
+        background: #1a1a1e !important;
+        border: 1px dashed #444 !important;
+        border-radius: 8px !important;
     }
-    div[data-testid="stChatModel"] label {
+    
+    [data-testid="stSidebar"] [data-testid="stFileUploader"] label {
         display: none !important;
     }
     
@@ -421,37 +390,50 @@ def render_login_page():
 
 
 def render_sidebar():
-    """Yan menüyü oluşturur."""
+    """Yan menuyu olusturur - Modern tasarim."""
     with st.sidebar:
-        # Kullanıcı bilgisi
+        # Kullanici bilgisi
         user = st.session_state.get('user', {})
-        st.markdown(f"**{user.get('name', 'Kullanıcı')}**")
+        st.markdown(f"**{user.get('name', 'Kullanici')}**")
         
-        # Dosya yükleme
-        st.divider()
-        st.markdown("**Dosya Yükle**")
+        st.markdown("")
+        
+        # Model secimi - sidebar'da
+        st.markdown("##### Model")
+        model_list = ["qwen2.5:7b", "gemma2:9b", "llama3.1:8b", "mistral", "llama3"]
+        model_names = ["Qwen 2.5", "Gemma 2", "Llama 3.1", "Mistral", "Llama 3"]
+        
+        if 'current_model_id' not in st.session_state:
+            st.session_state.current_model_id = 'qwen2.5:7b'
+        
+        current_idx = model_list.index(st.session_state.current_model_id) if st.session_state.current_model_id in model_list else 0
+        selected_name = st.selectbox(
+            "Model Sec",
+            model_names,
+            index=current_idx,
+            label_visibility="collapsed"
+        )
+        st.session_state.current_model_id = model_list[model_names.index(selected_name)]
+        st.session_state['selected_model'] = st.session_state.current_model_id
+        
+        st.markdown("")
+        
+        # Dosya yukleme - minimal
+        st.markdown("##### Dosya")
         uploaded_files = st.file_uploader(
-            "PDF veya Word dosyaları",
+            "yukle",
             accept_multiple_files=True, 
             type=["pdf", "docx", "doc"],
-            help="Çalışma materyallerinizi yükleyin"
+            label_visibility="collapsed"
         )
         
         if uploaded_files:
             st.session_state['uploaded_files'] = uploaded_files
             
-            # Model seçimi
-            selected_model = st.selectbox(
-                "Model", 
-                ["llama3", "phi3", "mistral", "gemma"],
-                label_visibility="collapsed"
-            )
-            st.session_state['selected_model'] = selected_model
-            
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Yükle", use_container_width=True):
-                    with st.spinner("Dosyalar işleniyor..."):
+                if st.button("Yukle", use_container_width=True):
+                    with st.spinner(""):
                         documents = get_document_text(uploaded_files)
                         for doc in documents:
                             doc_id = save_document(
@@ -461,15 +443,14 @@ def render_sidebar():
                             )
                             st.session_state[f'doc_{doc_id}_content'] = doc['content']
                         
-                        # Vektör veritabanı oluştur
                         combined_text = get_combined_text(uploaded_files)
                         if combined_text:
                             st.session_state['vectorstore'] = create_vector_db(combined_text)
-                            st.success(f"{len(documents)} dosya yüklendi")
+                            st.success(f"{len(documents)} dosya")
             
             with col2:
-                if st.button("Materyal Oluştur", use_container_width=True):
-                    with st.spinner("AI materyaller oluşturuyor..."):
+                if st.button("Materyal", use_container_width=True):
+                    with st.spinner(""):
                         documents = get_document_text(uploaded_files)
                         for doc in documents:
                             doc_id = save_document(
@@ -480,18 +461,20 @@ def render_sidebar():
                             results = generate_study_material(
                                 doc['content'],
                                 doc_id,
-                                selected_model,
+                                st.session_state.current_model_id,
                                 generate_summary_=True,
                                 flashcard_count=10,
                                 quiz_count=10
                             )
-                        st.success("Materyaller oluşturuldu")
+                        st.success("Tamam")
                         st.rerun()
         
-        # Çıkış butonu - en altta
-        st.divider()
+        # Bosluk
         st.markdown("")
         st.markdown("")
+        st.markdown("")
+        
+        # Cikis butonu
         if st.button("Çıkış Yap", use_container_width=True):
             st.session_state['logged_in'] = False
             st.session_state['user'] = None
@@ -499,61 +482,109 @@ def render_sidebar():
             st.rerun()
 
 def render_chat_tab(model_name):
-    """Sohbet sekmesini oluşturur."""
+    """Sohbet sekmesini olusturur - Custom HTML ile."""
     
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
-    # Mesajları göster
-    chat_container = st.container()
-    with chat_container:
-        st.markdown('<div style="margin-bottom: 20px;"></div>', unsafe_allow_html=True) 
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-        st.markdown('<div style="margin-bottom: 150px;"></div>', unsafe_allow_html=True)
+    # Custom Chat CSS
+    st.markdown("""
+    <style>
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 20px 0;
+        max-width: 800px;
+        margin: 0 auto;
+        padding-bottom: 120px;
+    }
+    .chat-message {
+        display: flex;
+        width: 100%;
+    }
+    .chat-message.user {
+        justify-content: flex-end;
+    }
+    .chat-message.assistant {
+        justify-content: flex-start;
+    }
+    .message-bubble {
+        max-width: 70%;
+        padding: 12px 18px;
+        border-radius: 18px;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        word-wrap: break-word;
+    }
+    .message-bubble.user {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #fff;
+        border-radius: 18px 18px 4px 18px;
+    }
+    .message-bubble.assistant {
+        background: #1e1e24;
+        color: #e0e0e0;
+        border: 1px solid #2a2a30;
+        border-radius: 18px 18px 18px 4px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Model Selector Wrapper
-    st.markdown('<div class="model-selector-wrapper">', unsafe_allow_html=True)
+    # Mesajlari custom HTML ile goster - her mesaj ayri render
+    for msg in st.session_state.messages:
+        role = msg["role"]
+        content = msg["content"].replace("\n", "<br>")
+        
+        if role == "user":
+            st.markdown(f'''
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 12px;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            color: #fff; padding: 12px 18px; border-radius: 18px 18px 4px 18px; 
+                            max-width: 70%; font-size: 0.95rem; line-height: 1.5;">
+                    {content}
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown(f'''
+            <div style="display: flex; justify-content: flex-start; margin-bottom: 12px;">
+                <div style="background: #1e1e24; color: #e0e0e0; 
+                            border: 1px solid #2a2a30; padding: 12px 18px; 
+                            border-radius: 18px 18px 18px 4px; max-width: 70%; 
+                            font-size: 0.95rem; line-height: 1.5;">
+                    {content}
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
     
-    st.selectbox(
-        "Model",
-        ["llama3", "phi3", "mistral", "gemma"],
-        label_visibility="collapsed",
-        key="chat_model"
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Alt bosluk
+    st.markdown('<div style="height: 100px;"></div>', unsafe_allow_html=True)
     
-    # Giriş alanı
-    if prompt := st.chat_input("Ask anything (Ctrl+L), @ to mention, / for workflows"):
+    # Giris alani (Streamlit native - bunu degistiremiyoruz)
+    if prompt := st.chat_input("Mesajinizi yazin..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         log_message_db("user", prompt)
         
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            with st.chat_message("assistant"):
-                with st.spinner(""):
-                    if "vectorstore" in st.session_state:
-                        ai_msg, docs = get_ai_response(
-                            selected_model, 
-                            st.session_state.vectorstore, 
-                            prompt,
-                            st.session_state.messages
-                        )
-                        st.markdown(ai_msg)
-                        
-                        if docs:
-                            with st.expander("Kaynaklar"):
-                                for i, doc in enumerate(docs):
-                                    st.caption(f"**Kaynak {i+1}:** {doc.page_content[:300]}...")
-                    else:
-                        ai_msg = get_quick_answer(selected_model, prompt)
-                        st.markdown(ai_msg)
+        # AI yaniti al
+        with st.spinner(""):
+            if "vectorstore" in st.session_state:
+                ai_msg, docs = get_ai_response(
+                    st.session_state.current_model_id, 
+                    st.session_state.vectorstore, 
+                    prompt,
+                    st.session_state.messages
+                )
                 
-                st.session_state.messages.append({"role": "assistant", "content": ai_msg})
-                log_message_db("assistant", ai_msg)
+                if docs:
+                    with st.expander("Kaynaklar"):
+                        for i, doc in enumerate(docs):
+                            st.caption(f"**Kaynak {i+1}:** {doc.page_content[:300]}...")
+            else:
+                ai_msg = get_quick_answer(st.session_state.current_model_id, prompt)
+            
+            st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+            log_message_db("assistant", ai_msg)
         st.rerun()
 
 def render_summary_tab(model_name):
