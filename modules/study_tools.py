@@ -259,7 +259,8 @@ def generate_quiz(text, count=10, model_name="llama3"):
 def generate_study_material(text, document_id, model_name="llama3", 
                            generate_summary_=True, 
                            flashcard_count=10, 
-                           quiz_count=10):
+                           quiz_count=10,
+                           user_id=None):
     """
     Tek seferde tüm çalışma materyallerini oluşturur.
     
@@ -270,12 +271,16 @@ def generate_study_material(text, document_id, model_name="llama3",
         generate_summary_: Özet oluşturulsun mu?
         flashcard_count: Flashcard sayısı
         quiz_count: Sınav sorusu sayısı
+        user_id: Kullanıcı ID (multi-tenant izolasyonu için zorunlu)
     
     Returns:
         dict: Oluşturulan materyaller
     """
-    from modules.database import (
-        save_summary, save_flashcards_bulk, save_quiz_questions_bulk, mark_document_processed
+    if user_id is None:
+        raise ValueError("Security Error: generate_study_material requires user_id parameter")
+    
+    from modules.repo_documents import (
+        create_summary, create_flashcards_bulk, create_quiz_questions_bulk, mark_document_processed
     )
     
     results = {
@@ -289,25 +294,25 @@ def generate_study_material(text, document_id, model_name="llama3",
         if generate_summary_:
             summary = generate_summary(text, model_name)
             if summary and not summary.startswith("Özet oluşturulurken hata"):
-                save_summary(document_id, summary)
+                create_summary(document_id, summary, user_id=user_id)
                 results['summary'] = summary
         
         # Flashcard'lar oluştur
         if flashcard_count > 0:
             flashcards = generate_flashcards(text, flashcard_count, model_name)
             if flashcards:
-                save_flashcards_bulk(document_id, flashcards)
+                create_flashcards_bulk(flashcards, user_id=user_id, document_id=document_id)
                 results['flashcards'] = flashcards
         
         # Sınav soruları oluştur
         if quiz_count > 0:
             questions = generate_quiz(text, quiz_count, model_name)
             if questions:
-                save_quiz_questions_bulk(document_id, questions)
+                create_quiz_questions_bulk(questions, user_id=user_id, document_id=document_id)
                 results['quiz_questions'] = questions
         
         # Dokümanı işlenmiş olarak işaretle
-        mark_document_processed(document_id)
+        mark_document_processed(document_id, user_id=user_id)
         
     except Exception as e:
         print(f"Materyal oluşturma hatası: {e}")

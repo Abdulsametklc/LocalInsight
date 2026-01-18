@@ -1,195 +1,265 @@
 """
-Authentication Module
-Kullanıcı kimlik doğrulama ve oturum yönetimi.
+Authentication Module - Multi-Tenant Ready
+===========================================
+Login, register, password hashing ve session yonetimi.
 """
 
-import sqlite3
-import hashlib
-import os
-from datetime import datetime
+import bcrypt
+import streamlit as st
+from typing import Optional
+from .db import get_db, execute_query
 
-DB_NAME = "LocalInsights.db"
 
-def get_connection():
-    """Veritabanı bağlantısı oluşturur."""
-    return sqlite3.connect(DB_NAME)
-
-def init_auth_db():
-    """Kimlik doğrulama tablolarını oluşturur."""
-    conn = get_connection()
-    c = conn.cursor()
+def hash_password(password: str) -> str:
+    """Sifreyi bcrypt ile hashler.
     
-    # Kullanıcılar tablosu
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        full_name TEXT,
-        password_hash TEXT NOT NULL,
-        salt TEXT NOT NULL,
-        created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_login DATETIME
-    )''')
-    
-    # Mevcut tabloya full_name kolonu ekle (varsa geç)
-    try:
-        c.execute('ALTER TABLE users ADD COLUMN full_name TEXT')
-    except:
-        pass
-    
-    conn.commit()
-    conn.close()
-
-def hash_password(password, salt=None):
-    """Şifreyi güvenli şekilde hashler."""
-    if salt is None:
-        salt = os.urandom(32).hex()
-    
-    # PBKDF2 benzeri basit hash (production'da bcrypt kullanılmalı)
-    password_hash = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000
-    ).hex()
-    
-    return password_hash, salt
-
-def register_user(email, password, full_name=""):
+    Args:
+        password: Plain text sifre
+        
+    Returns:
+        Hashlenmiş sifre (string)
     """
-    Yeni kullanıcı kaydı yapar.
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Sifreyi hash ile dogrular.
+    
+    Args:
+        password: Plain text sifre
+        password_hash: Veritabanindaki hash
+        
+    Returns:
+        True eger sifre dogru ise
+    """
+    try:
+        return bcrypt.checkpw(
+            password.encode('utf-8'), 
+            password_hash.encode('utf-8')
+        )
+    except Exception:
+        return False
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    """Email ile kullanici bilgilerini getirir.
+    
+    Args:
+        email: Kullanici email adresi
+        
+    Returns:
+        User dict veya None
+    """
+    return execute_query(
+        "SELECT id, email, password_hash, name, is_active FROM users WHERE email = ?",
+        (email.lower().strip(),),
+        fetch='one'
+    )
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    """ID ile kullanici bilgilerini getirir.
+    
+    Args:
+        user_id: Kullanici ID
+        
+    Returns:
+        User dict veya None
+    """
+    return execute_query(
+        "SELECT id, email, name, is_active, created_at FROM users WHERE id = ?",
+        (user_id,),
+        fetch='one'
+    )
+
+
+def login(email: str, password: str) -> Optional[dict]:
+    """Kullanici girisi yapar.
+    
+    GUVENLIK: Basarisiz durumda None doner - generic mesaj icin.
+    Hata mesajinda email'in var olup olmadigi belli olmamali.
+    
+    Args:
+        email: Kullanici email adresi
+        password: Plain text sifre
+        
+    Returns:
+        User dict (id, email, name) veya None
+    """
+    email = email.lower().strip()
+    user = get_user_by_email(email)
+    
+    if not user:
+        return None  # Generic - enumeration korumasi
+    
+    if not user.get('is_active', True):
+        return None  # Deaktif kullanici
+    
+    if not verify_password(password, user['password_hash']):
+        return None  # Yanlis sifre
+    
+    # Update last login
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (user['id'],)
+        )
+        conn.commit()
+    
+    return {
+        'id': user['id'],
+        'email': user['email'],
+        'name': user['name']
+    }
+
+
+def register(email: str, password: str, name: str) -> Optional[int]:
+    """Yeni kullanici kaydeder.
+    
+    Args:
+        email: Kullanici email adresi
+        password: Plain text sifre
+        name: Kullanici adi
+        
+    Returns:
+        Yeni user_id veya None (email zaten varsa)
+    """
+    email = email.lower().strip()
+    
+    # Email kontrolu
+    existing = get_user_by_email(email)
+    if existing:
+        return None
+    
+    # Sifre validasyonu
+    if len(password) < 6:
+        raise ValueError("Sifre en az 6 karakter olmali")
+    
+    # Kullanici olustur
+    with get_db() as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)",
+            (email, hash_password(password), name.strip())
+        )
+        conn.commit()
+        user_id = cursor.lastrowid
+        
+        # Default preferences olustur
+        conn.execute(
+            "INSERT INTO user_preferences (user_id) VALUES (?)",
+            (user_id,)
+        )
+        conn.commit()
+        
+        return user_id
+
+
+def get_current_user_id() -> Optional[int]:
+    """Session'dan aktif user_id'yi doner.
     
     Returns:
-        tuple: (success: bool, message: str, user_id: int or None)
+        user_id veya None (login olmamis ise)
     """
-    conn = get_connection()
-    c = conn.cursor()
-    
-    try:
-        # Email kontrolü
-        c.execute("SELECT id FROM users WHERE email = ?", (email.lower(),))
-        if c.fetchone():
-            conn.close()
-            return False, "Bu email adresi zaten kayıtlı.", None
-        
-        # Şifre hash'le
-        password_hash, salt = hash_password(password)
-        
-        # Kullanıcı ekle
-        c.execute(
-            "INSERT INTO users (email, full_name, password_hash, salt) VALUES (?, ?, ?, ?)",
-            (email.lower(), full_name.strip(), password_hash, salt)
-        )
-        user_id = c.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return True, "Kayıt başarılı!", user_id
-    
-    except Exception as e:
-        conn.close()
-        return False, f"Kayıt hatası: {e}", None
+    return st.session_state.get('user_id')
 
-def login_user(email, password):
-    """
-    Kullanıcı girişi yapar.
+
+def get_current_user() -> Optional[dict]:
+    """Session'dan aktif kullanici bilgilerini doner.
     
     Returns:
-        tuple: (success: bool, message: str, user_data: dict or None)
+        User dict veya None
     """
-    conn = get_connection()
-    c = conn.cursor()
+    return st.session_state.get('user')
+
+
+def is_logged_in() -> bool:
+    """Kullanici giris yapmis mi kontrol eder."""
+    return st.session_state.get('logged_in', False) and get_current_user_id() is not None
+
+
+def set_session(user: dict):
+    """Login sonrasi session'u ayarlar.
     
+    Args:
+        user: login() fonksiyonundan donen user dict
+    """
+    st.session_state['user_id'] = user['id']
+    st.session_state['user'] = user
+    st.session_state['logged_in'] = True
+    st.session_state['messages'] = []  # Yeni sohbet
+
+
+def clear_session():
+    """Logout - tum kullanici verilerini temizler.
+    
+    GUVENLIK: Session fixation ve veri sizintisi onlemi.
+    """
+    keys_to_clear = [
+        'user_id', 'user', 'logged_in', 'messages',
+        'vectorstore', 'current_model_id', 'conversation_id',
+        'selected_model', 'uploaded_files'
+    ]
+    
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    # Cache temizligi
     try:
-        # Kullanıcıyı bul
-        c.execute(
-            "SELECT id, email, full_name, password_hash, salt FROM users WHERE email = ?",
-            (email.lower(),)
-        )
-        user = c.fetchone()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+    except Exception:
+        pass  # Cache clear bazi durumlarda hata verebilir
+
+
+def require_login(func):
+    """Decorator: Login olmadan erisimi engeller.
+    
+    Usage:
+        @require_login
+        def protected_page():
+            ...
+    """
+    from functools import wraps
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not is_logged_in():
+            st.warning("Bu sayfayi goruntulemek icin giris yapin.")
+            st.stop()
+        return func(*args, **kwargs)
+    return wrapper
+
+
+def update_password(user_id: int, old_password: str, new_password: str) -> bool:
+    """Kullanici sifresini gunceller.
+    
+    Args:
+        user_id: Kullanici ID
+        old_password: Mevcut sifre
+        new_password: Yeni sifre
         
-        if not user:
-            conn.close()
-            return False, "Bu email adresi kayıtlı değil.", None
-        
-        user_id, user_email, full_name, stored_hash, salt = user
-        
-        # Şifre kontrolü
-        password_hash, _ = hash_password(password, salt)
-        
-        if password_hash != stored_hash:
-            conn.close()
-            return False, "Şifre hatalı.", None
-        
-        # Son giriş zamanını güncelle
-        c.execute(
-            "UPDATE users SET last_login = ? WHERE id = ?",
-            (datetime.now(), user_id)
+    Returns:
+        True eger guncelleme basarili ise
+    """
+    user = execute_query(
+        "SELECT password_hash FROM users WHERE id = ?",
+        (user_id,),
+        fetch='one'
+    )
+    
+    if not user or not verify_password(old_password, user['password_hash']):
+        return False
+    
+    if len(new_password) < 6:
+        return False
+    
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (hash_password(new_password), user_id)
         )
         conn.commit()
-        conn.close()
-        
-        return True, "Giriş başarılı!", {
-            'id': user_id,
-            'email': user_email,
-            'name': full_name if full_name else user_email.split('@')[0]
-        }
     
-    except Exception as e:
-        conn.close()
-        return False, f"Giriş hatası: {e}", None
-
-def get_user_by_id(user_id):
-    """Kullanıcı bilgilerini getirir."""
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, email, created_date, last_login FROM users WHERE id = ?", (user_id,))
-    user = c.fetchone()
-    conn.close()
-    
-    if user:
-        return {
-            'id': user[0],
-            'email': user[1],
-            'created_date': user[2],
-            'last_login': user[3]
-        }
-    return None
-
-def change_password(user_id, old_password, new_password):
-    """Şifre değiştirir."""
-    conn = get_connection()
-    c = conn.cursor()
-    
-    try:
-        # Mevcut kullanıcıyı al
-        c.execute("SELECT password_hash, salt FROM users WHERE id = ?", (user_id,))
-        result = c.fetchone()
-        
-        if not result:
-            conn.close()
-            return False, "Kullanıcı bulunamadı."
-        
-        stored_hash, salt = result
-        
-        # Eski şifre kontrolü
-        old_hash, _ = hash_password(old_password, salt)
-        if old_hash != stored_hash:
-            conn.close()
-            return False, "Mevcut şifre hatalı."
-        
-        # Yeni şifre hash'le
-        new_hash, new_salt = hash_password(new_password)
-        
-        # Güncelle
-        c.execute(
-            "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
-            (new_hash, new_salt, user_id)
-        )
-        conn.commit()
-        conn.close()
-        
-        return True, "Şifre başarıyla değiştirildi."
-    
-    except Exception as e:
-        conn.close()
-        return False, f"Şifre değiştirme hatası: {e}"
+    return True

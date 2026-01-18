@@ -1,13 +1,24 @@
 ﻿import streamlit as st
-from modules.database import (
-    init_db, log_message_db,
-    save_document, get_all_documents, get_document_by_id,
-    get_all_summaries, get_summaries_by_document,
-    get_all_flashcards, get_flashcards_for_review, update_flashcard_review,
-    get_all_quiz_questions, get_random_quiz, log_quiz_result,
+
+# New multi-tenant ready modules
+from modules.db import init_db
+from modules.auth import (
+    login, register, is_logged_in, get_current_user_id, 
+    get_current_user, set_session, clear_session
+)
+from modules.repo_chat import (
+    create_conversation, list_conversations, get_conversation,
+    create_message, get_messages, log_model_call
+)
+from modules.repo_documents import (
+    create_document, get_documents, get_document, delete_document,
+    create_summary, get_summaries,
+    create_flashcards_bulk, get_flashcards, get_flashcards_for_review, update_flashcard_review,
+    create_quiz_questions_bulk, get_quiz_questions, get_random_quiz, log_quiz_result,
     get_learning_stats
 )
-from modules.auth import init_auth_db, register_user, login_user, get_user_by_id
+
+# Other modules
 from modules.document_handler import get_document_text, get_combined_text
 from modules.rag_engine import create_vector_db, get_ai_response, get_quick_answer
 from modules.study_tools import generate_summary, generate_flashcards, generate_quiz, generate_study_material
@@ -238,7 +249,6 @@ st.markdown("""
 
 # Veritabanlarını başlat
 init_db()
-init_auth_db()
 
 def render_login_page():
     """Giriş/Kayıt sayfasını oluşturur - Minimalist tasarım."""
@@ -344,13 +354,12 @@ def render_login_page():
                 
                 if submit:
                     if email and password:
-                        success, message, user_data = login_user(email, password)
-                        if success:
-                            st.session_state['logged_in'] = True
-                            st.session_state['user'] = user_data
+                        user = login(email, password)
+                        if user:
+                            set_session(user)  # user_id, user dict, logged_in
                             st.rerun()
                         else:
-                            st.error(message)
+                            st.error("Email veya şifre hatalı.")  # Generic - enumeration koruması
                     else:
                         st.warning("Email ve şifre gerekli.")
         
@@ -362,9 +371,9 @@ def render_login_page():
                 confirm_password = st.text_input("Şifre Tekrar", type="password", placeholder="Şifrenizi tekrar girin", key="reg_confirm", label_visibility="collapsed")
                 
                 st.markdown("")
-                register = st.form_submit_button("Hesap Oluştur", use_container_width=True)
+                register_submit = st.form_submit_button("Hesap Oluştur", use_container_width=True)
                 
-                if register:
+                if register_submit:
                     if not full_name or not new_email or not new_password:
                         st.warning("Tüm alanları doldurun.")
                     elif len(new_password) < 6:
@@ -374,11 +383,11 @@ def render_login_page():
                     elif "@" not in new_email:
                         st.error("Geçerli bir email girin.")
                     else:
-                        success, message, user_id = register_user(new_email, new_password, full_name)
-                        if success:
+                        user_id = register(new_email, new_password, full_name)
+                        if user_id:
                             st.success("Hesap oluşturuldu! Giriş yapabilirsiniz.")
                         else:
-                            st.error(message)
+                            st.error("Bu email zaten kayıtlı.")
         
         # Alt bilgi
         st.markdown("")
@@ -429,6 +438,7 @@ def render_sidebar():
         
         if uploaded_files:
             st.session_state['uploaded_files'] = uploaded_files
+            user_id = get_current_user_id()
             
             col1, col2 = st.columns(2)
             with col1:
@@ -436,16 +446,19 @@ def render_sidebar():
                     with st.spinner(""):
                         documents = get_document_text(uploaded_files)
                         for doc in documents:
-                            doc_id = save_document(
+                            doc_id = create_document(
                                 doc['filename'], 
                                 doc['content'], 
-                                doc['doc_type']
+                                doc['doc_type'],
+                                user_id=user_id
                             )
                             st.session_state[f'doc_{doc_id}_content'] = doc['content']
                         
                         combined_text = get_combined_text(uploaded_files)
                         if combined_text:
+                            # Vectorstore user_id ile cache'lenir
                             st.session_state['vectorstore'] = create_vector_db(combined_text)
+                            st.session_state['vectorstore_user_id'] = user_id  # Izolasyon icin
                             st.success(f"{len(documents)} dosya")
             
             with col2:
@@ -453,10 +466,11 @@ def render_sidebar():
                     with st.spinner(""):
                         documents = get_document_text(uploaded_files)
                         for doc in documents:
-                            doc_id = save_document(
+                            doc_id = create_document(
                                 doc['filename'], 
                                 doc['content'], 
-                                doc['doc_type']
+                                doc['doc_type'],
+                                user_id=user_id
                             )
                             results = generate_study_material(
                                 doc['content'],
@@ -464,7 +478,8 @@ def render_sidebar():
                                 st.session_state.current_model_id,
                                 generate_summary_=True,
                                 flashcard_count=10,
-                                quiz_count=10
+                                quiz_count=10,
+                                user_id=user_id  # Materyaller user_id ile kaydedilecek
                             )
                         st.success("Tamam")
                         st.rerun()
@@ -476,9 +491,7 @@ def render_sidebar():
         
         # Cikis butonu
         if st.button("Çıkış Yap", use_container_width=True):
-            st.session_state['logged_in'] = False
-            st.session_state['user'] = None
-            st.session_state['messages'] = []
+            clear_session()  # Guvenli cikis - tum user verilerini ve cache'leri temizler
             st.rerun()
 
 def render_chat_tab(model_name):
@@ -563,17 +576,40 @@ def render_chat_tab(model_name):
     
     # Giris alani (Streamlit native - bunu degistiremiyoruz)
     if prompt := st.chat_input("Mesajinizi yazin..."):
+        user_id = get_current_user_id()
+        if not user_id:
+            st.error("Oturum gecersiz. Lutfen tekrar giris yapin.")
+            st.stop()
+        
         st.session_state.messages.append({"role": "user", "content": prompt})
-        log_message_db("user", prompt)
+        
+        # Conversation yoksa olustur
+        if 'conversation_id' not in st.session_state:
+            conv_id = create_conversation(user_id=user_id, title=prompt[:50])
+            st.session_state['conversation_id'] = conv_id
+        
+        # Mesaji kaydet
+        create_message(
+            st.session_state['conversation_id'], 
+            "user", 
+            prompt, 
+            user_id=user_id
+        )
         
         # AI yaniti al
         with st.spinner(""):
             if "vectorstore" in st.session_state:
+                # Vectorstore user izolasyonu kontrol
+                if st.session_state.get('vectorstore_user_id') != user_id:
+                    st.warning("Bu vectorstore baska bir kullaniciya ait.")
+                    st.stop()
+                
                 ai_msg, docs = get_ai_response(
                     st.session_state.current_model_id, 
                     st.session_state.vectorstore, 
                     prompt,
-                    st.session_state.messages
+                    st.session_state.messages,
+                    user_id=user_id  # Kisisellestirilmis hafiza icin
                 )
                 
                 if docs:
@@ -581,47 +617,67 @@ def render_chat_tab(model_name):
                         for i, doc in enumerate(docs):
                             st.caption(f"**Kaynak {i+1}:** {doc.page_content[:300]}...")
             else:
-                ai_msg = get_quick_answer(st.session_state.current_model_id, prompt)
+                ai_msg = get_quick_answer(st.session_state.current_model_id, prompt, user_id=user_id)
             
             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
-            log_message_db("assistant", ai_msg)
+            
+            # AI mesajini kaydet
+            create_message(
+                st.session_state['conversation_id'], 
+                "assistant", 
+                ai_msg, 
+                user_id=user_id
+            )
         st.rerun()
 
 def render_summary_tab(model_name):
     """Özet sekmesini oluşturur."""
+    user_id = get_current_user_id()
+    if not user_id:
+        st.error("Oturum gecersiz.")
+        st.stop()
+    
     st.markdown("**Özetler**")
     
-    summaries = get_all_summaries()
+    summaries = get_summaries(user_id=user_id)
     
     if summaries:
         st.markdown("Kayıtlı Özetler")
         for summary in summaries:
-            with st.expander(f"{summary[1]} - {summary[3][:10]}"):
-                st.markdown(summary[2])
+            with st.expander(f"{summary['filename']} - {str(summary['created_at'])[:10]}"):
+                st.markdown(summary['summary_text'])
     else:
         st.info("Henüz özet oluşturulmamış. Sol menüden dosya yükleyip 'Materyal' butonuna basın.")
     
     st.divider()
     st.markdown("**Yeni Özet Oluştur**")
     
-    documents = get_all_documents()
+    documents = get_documents(user_id=user_id)
     if documents:
-        doc_options = {f"{doc[1]} ({doc[3][:10]})": doc[0] for doc in documents}
+        doc_options = {f"{doc['filename']} ({str(doc['upload_date'])[:10]})": doc['id'] for doc in documents}
         selected_doc = st.selectbox("Doküman seçin:", list(doc_options.keys()))
         
         if st.button("Özet Oluştur"):
             doc_id = doc_options[selected_doc]
-            doc_data = get_document_by_id(doc_id)
+            doc_data = get_document(doc_id, user_id=user_id)
+            
+            if not doc_data:
+                st.error("Dokuman bulunamadi veya erisim yetkiniz yok.")
+                st.stop()
             
             with st.spinner("Özet oluşturuluyor..."):
-                summary = generate_summary(doc_data[2], model_name)
-                from modules.database import save_summary
-                save_summary(doc_id, summary)
+                summary = generate_summary(doc_data['content'], model_name)
+                create_summary(doc_id, summary, user_id=user_id)
                 st.success("Özet oluşturuldu!")
                 st.markdown(summary)
 
 def render_quiz_tab(model_name):
     """Sınav sekmesini oluşturur."""
+    user_id = get_current_user_id()
+    if not user_id:
+        st.error("Oturum gecersiz.")
+        st.stop()
+    
     st.markdown("**Sınav**")
     
     if 'quiz_state' not in st.session_state:
@@ -638,22 +694,22 @@ def render_quiz_tab(model_name):
     if not quiz_state['active']:
         st.markdown("**Yeni Sınav Başlat**")
         
-        documents = get_all_documents()
-        all_questions = get_all_quiz_questions()
+        documents = get_documents(user_id=user_id)
+        all_questions = get_quiz_questions(user_id=user_id)
         
         if all_questions:
             col1, col2 = st.columns(2)
             with col1:
                 question_count = st.slider("Soru sayısı:", 5, min(20, len(all_questions)), 10)
             with col2:
-                doc_filter = st.selectbox("Doküman:", ["Tümü"] + [doc[1] for doc in documents])
+                doc_filter = st.selectbox("Doküman:", ["Tümü"] + [doc['filename'] for doc in documents])
             
             if st.button("🚀 Sınava Başla", type="primary"):
                 if doc_filter == "Tümü":
-                    questions = get_random_quiz(count=question_count)
+                    questions = get_random_quiz(user_id=user_id, count=question_count)
                 else:
-                    doc_id = next((doc[0] for doc in documents if doc[1] == doc_filter), None)
-                    questions = get_random_quiz(document_id=doc_id, count=question_count)
+                    doc_id = next((doc['id'] for doc in documents if doc['filename'] == doc_filter), None)
+                    questions = get_random_quiz(user_id=user_id, document_id=doc_id, count=question_count)
                 
                 if questions:
                     quiz_state['active'] = True
@@ -670,7 +726,13 @@ def render_quiz_tab(model_name):
         
         if idx < len(questions):
             q = questions[idx]
-            q_id, q_type, q_text, options_str, correct, explanation = q
+            # Dict access - yeni repo fonksiyonlari dict doner
+            q_id = q['id']
+            q_type = q['question_type']
+            q_text = q['question_text']
+            options_str = q.get('options', '')
+            correct = q['correct_answer']
+            explanation = q.get('explanation', '')
             
             st.progress((idx + 1) / len(questions), text=f"Soru {idx + 1}/{len(questions)}")
             st.subheader(f"{q_text}")
@@ -691,9 +753,9 @@ def render_quiz_tab(model_name):
                             quiz_state['answered'] = True
                             if opt == correct:
                                 quiz_state['score'] += 1
-                                log_quiz_result(q_id, True)
+                                log_quiz_result(q_id, True, user_id=user_id)
                             else:
-                                log_quiz_result(q_id, False)
+                                log_quiz_result(q_id, False, user_id=user_id)
                             st.rerun()
             
             if quiz_state['answered']:
@@ -716,6 +778,11 @@ def render_quiz_tab(model_name):
 
 def render_flashcard_tab(model_name):
     """Flashcard sekmesini oluşturur."""
+    user_id = get_current_user_id()
+    if not user_id:
+        st.error("Oturum gecersiz.")
+        st.stop()
+    
     st.markdown("**Bilgi Kartları**")
     
     if 'fc_state' not in st.session_state:
@@ -727,7 +794,7 @@ def render_flashcard_tab(model_name):
     
     with tab1:
         if not fc['active']:
-            review_cards = get_flashcards_for_review(limit=20)
+            review_cards = get_flashcards_for_review(user_id=user_id, limit=20)
             st.metric("Tekrar Bekleyen", len(review_cards))
             
             if review_cards:
@@ -746,7 +813,13 @@ def render_flashcard_tab(model_name):
             
             if idx < len(cards):
                 card = cards[idx]
-                card_id, filename, question, answer, difficulty, times = card
+                # Dict access - yeni repo fonksiyonlari dict doner
+                card_id = card['id']
+                filename = card.get('filename', '')
+                question = card['question']
+                answer = card['answer']
+                difficulty = card.get('difficulty', 'orta')
+                times = card.get('times_reviewed', 0)
                 
                 st.progress((idx + 1) / len(cards), text=f"Kart {idx + 1}/{len(cards)}")
                 
@@ -761,13 +834,13 @@ def render_flashcard_tab(model_name):
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button("Bilmiyordum", use_container_width=True):
-                            update_flashcard_review(card_id, False)
+                            update_flashcard_review(card_id, False, user_id=user_id)
                             fc['idx'] += 1
                             fc['show'] = False
                             st.rerun()
                     with c2:
                         if st.button("Biliyordum", use_container_width=True):
-                            update_flashcard_review(card_id, True)
+                            update_flashcard_review(card_id, True, user_id=user_id)
                             fc['idx'] += 1
                             fc['show'] = False
                             st.rerun()
@@ -779,12 +852,12 @@ def render_flashcard_tab(model_name):
                     st.rerun()
     
     with tab2:
-        all_cards = get_all_flashcards()
+        all_cards = get_flashcards(user_id=user_id)
         if all_cards:
             for c in all_cards:
-                with st.expander(f"{c[1]} | {c[2][:40]}..."):
-                    st.write(f"**S:** {c[2]}")
-                    st.write(f"**C:** {c[3]}")
+                with st.expander(f"{c.get('filename', 'Bilinmiyor')} | {c['question'][:40]}..."):
+                    st.write(f"**S:** {c['question']}")
+                    st.write(f"**C:** {c['answer']}")
 
 def main():
     """Ana uygulama."""

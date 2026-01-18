@@ -8,7 +8,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
-from modules.database import get_profile_db, get_learning_stats
 import os
 
 # Vektör veritabanı kaydetme/yükleme yolu
@@ -78,28 +77,31 @@ def add_to_vector_db(text, existing_vectorstore=None):
         # Yeni oluştur
         return FAISS.from_texts(texts=chunks, embedding=embeddings)
 
-def get_personalized_context():
-    """Kişiselleştirme için kullanıcı bağlamı oluşturur."""
-    user_profile = get_profile_db()
-    if not user_profile:
-        user_profile = "Kullanıcı hakkında özel bilgi yok."
+def get_personalized_context(user_id: int = None):
+    """Kişiselleştirme için kullanıcı bağlamı oluşturur.
     
-    # Öğrenme istatistiklerini al
+    Args:
+        user_id: Kullanıcı ID (multi-tenant için zorunlu)
+    
+    Returns:
+        (user_profile, learning_context) tuple
+    """
+    if not user_id:
+        return "Kullanıcı hakkında özel bilgi yok.", ""
+    
     try:
-        stats = get_learning_stats()
-        learning_context = f"""
-Öğrenme İstatistikleri:
-- Toplam Doküman: {stats.get('total_documents', 0)}
-- Toplam Flashcard: {stats.get('total_flashcards', 0)}
-- Bugün Tekrar Edilen: {stats.get('cards_reviewed_today', 0)}
-- Genel Başarı Oranı: %{stats.get('success_rate', 0)}
-"""
-    except:
-        learning_context = ""
-    
-    return user_profile, learning_context
+        from .memory_engine import build_memory_context
+        memory_context = build_memory_context(user_id)
+        
+        if memory_context:
+            return memory_context, ""
+        else:
+            return "Kullanıcı hakkında özel bilgi yok.", ""
+    except Exception as e:
+        print(f"Memory context error: {e}")
+        return "Kullanıcı hakkında özel bilgi yok.", ""
 
-def get_ai_response(model_name, vectorstore, user_question, chat_history=None):
+def get_ai_response(model_name, vectorstore, user_question, chat_history=None, user_id=None):
     """
     Ollama'ya soruyu sorar. Kişiselleştirilmiş yanıt döndürür.
     
@@ -108,13 +110,14 @@ def get_ai_response(model_name, vectorstore, user_question, chat_history=None):
         vectorstore: FAISS vektör veritabanı
         user_question: Kullanıcının sorusu
         chat_history: Önceki sohbet geçmişi (opsiyonel)
+        user_id: Kullanıcı ID (kişiselleştirme için)
     
     Returns:
         tuple: (AI yanıtı, kaynak dokümanlar)
     """
     try:
-        # 1. Kişiselleştirme bilgilerini al
-        user_profile, learning_context = get_personalized_context()
+        # 1. Kişiselleştirme bilgilerini al (user_id ile)
+        user_profile, learning_context = get_personalized_context(user_id=user_id)
 
         # 2. Benzer içerikleri bul
         docs = vectorstore.similarity_search(user_question, k=4)
@@ -130,6 +133,8 @@ def get_ai_response(model_name, vectorstore, user_question, chat_history=None):
         
         # 4. Gelişmiş prompt - Chain of Thought + Türkçe yanıt
         template = """Sen LocalInsights asistanısın - akıllı, yardımsever ve kişiselleştirilmiş bir eğitim asistanısın.
+
+⚠️ DİL KURALI: SADECE TÜRKÇE YANIŞ VER. ASLA BAŞKA DİL KULLANMA. NO CHINESE. NO ENGLISH.
 
 KULLANICI BİLGİLERİ:
 {user_profile}
@@ -150,7 +155,7 @@ DÜŞÜNCE SÜRECİ (Adım adım düşün):
 4. Emin olmadığın bilgileri "Bu konuda dokümanda bilgi bulamadım" diye belirt.
 
 KRİTİK KURALLAR:
-- TÜM YANITLAR MUTLAKA TÜRKÇE OLMALIDIR.
+- ⚠️ SADECE TÜRKÇE YANIT VER. ÇİNCE, İNGİLİZCE VEYA BAŞKA DİL KULLANMA!
 - SADECE DÖKÜMAN İÇERİĞİNDEKİ bilgileri kullan. Uydurma yapma.
 - Bilgi dokümanda yoksa açıkça belirt.
 - Yapılandırılmış ve anlaşılır yanıtlar ver.
@@ -161,7 +166,7 @@ YANIT FORMAT:
 - Gerekirse madde işaretleri kullan.
 - Teknik terimleri açıkla.
 
-TÜRKÇE YANITINI VER:"""
+🇹🇷 TÜRKÇE YANITINI VER (BAŞKA DİL YASAK):"""
         
         history_section = f"SON SOHBET GEÇMİŞİ:\n{history_text}" if history_text else ""
         
@@ -182,20 +187,23 @@ TÜRKÇE YANITINI VER:"""
     except Exception as e:
         return f"HATA: {e}", []
 
-def get_quick_answer(model_name, question):
+def get_quick_answer(model_name, question, user_id=None):
     """
     Doküman olmadan hızlı cevap verir.
     
     Args:
         model_name: Kullanılacak model
         question: Kullanıcının sorusu
+        user_id: Kullanıcı ID (kişiselleştirme için)
     
     Returns:
         str: AI yanıtı
     """
     try:
-        user_profile, _ = get_personalized_context()
+        user_profile, _ = get_personalized_context(user_id=user_id)
         template = """Sen LocalInsights asistanısın - akıllı ve yardımsever bir eğitim asistanı.
+
+⚠️ DİL KURALI: SADECE TÜRKÇE YANIT VER. ÇİNCE, İNGİLİZCE VEYA BAŞKA DİL ASLA KULLANMA!
 
 KULLANICI BİLGİLERİ: {user_profile}
 
@@ -207,12 +215,12 @@ DÜŞÜNCE SÜRECİ:
 3. Emin değilsen belirt.
 
 KRİTİK KURALLAR:
-- MUTLAKA TÜRKÇE yanıt ver.
+- ⚠️ SADECE TÜRKÇE YANIT VER. NO CHINESE!
 - Kullanıcıya ismiyle hitap et.
 - Kısa ve samimi ol.
 - Uydurma yapma, bilmiyorsan söyle.
 
-TÜRKÇE YANITINI VER:"""
+🇹🇷 TÜRKÇE YANITINI VER:"""
         
         prompt = ChatPromptTemplate.from_template(template)
         llm = ChatOllama(model=model_name, temperature=0.2)
